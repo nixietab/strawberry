@@ -177,6 +177,10 @@
 #  include "tidal/tidalservice.h"
 #  include "constants/tidalsettings.h"
 #endif
+#ifdef HAVE_JELLYFIN
+#  include "jellyfin/jellyfinservice.h"
+#  include "constants/jellyfinsettings.h"
+#endif
 #ifdef HAVE_SPOTIFY
 #  include "spotify/spotifyservice.h"
 #  include "spotify/spotifymetadatarequest.h"
@@ -380,6 +384,9 @@ MainWindow::MainWindow(Application *app,
 #ifdef HAVE_QOBUZ
       qobuz_view_(new StreamingTabsView(app->streaming_services()->ServiceBySource(Song::Source::Qobuz), app->albumcover_loader(), QLatin1String(QobuzSettings::kSettingsGroup), this)),
 #endif
+#ifdef HAVE_JELLYFIN
+      jellyfin_view_(new StreamingTabsView(app->streaming_services()->ServiceBySource(Song::Source::Jellyfin), app->albumcover_loader(), QLatin1String(JellyfinSettings::kSettingsGroup), this)),
+#endif
       radio_view_(new RadioViewContainer(this)),
       collection_show_all_(nullptr),
       collection_show_duplicates_(nullptr),
@@ -473,6 +480,9 @@ MainWindow::MainWindow(Application *app,
 #endif
 #ifdef HAVE_QOBUZ
   ui_->tabs->AddTab(qobuz_view_, u"qobuz"_s, IconLoader::Load(u"qobuz"_s, true, 0, 32), tr("Qobuz"));
+#endif
+#ifdef HAVE_JELLYFIN
+  ui_->tabs->AddTab(jellyfin_view_, u"jellyfin"_s, IconLoader::Load(u"jellyfin"_s, true, 0, 32), tr("Jellyfin"));
 #endif
 
   // Add the playing widget to the fancy tab widget
@@ -826,6 +836,15 @@ MainWindow::MainWindow(Application *app,
   if (TidalServicePtr tidalservice = app_->streaming_services()->Service<TidalService>()) {
     QObject::connect(this, &MainWindow::AuthorizationUrlReceived, &*tidalservice, &TidalService::AuthorizationUrlReceived);
   }
+#endif
+
+#ifdef HAVE_JELLYFIN
+  QObject::connect(jellyfin_view_, &StreamingTabsView::OpenSettingsDialog, this, &MainWindow::OpenServiceSettingsDialog);
+  QObject::connect(jellyfin_view_->artists_collection_view(), &StreamingCollectionView::AddToPlaylistSignal, this, &MainWindow::AddToPlaylist);
+  QObject::connect(jellyfin_view_->albums_collection_view(), &StreamingCollectionView::AddToPlaylistSignal, this, &MainWindow::AddToPlaylist);
+  QObject::connect(jellyfin_view_->songs_collection_view(), &StreamingCollectionView::AddToPlaylistSignal, this, &MainWindow::AddToPlaylist);
+  QObject::connect(jellyfin_view_->search_view(), &StreamingSearchView::OpenSettingsDialog, this, &MainWindow::OpenServiceSettingsDialog);
+  QObject::connect(jellyfin_view_->search_view(), &StreamingSearchView::AddToPlaylist, this, &MainWindow::AddToPlaylist);
 #endif
 
 #ifdef HAVE_QOBUZ
@@ -1315,6 +1334,18 @@ void MainWindow::ReloadSettings() {
   }
 #endif
 
+#ifdef HAVE_JELLYFIN
+  s.beginGroup(JellyfinSettings::kSettingsGroup);
+  bool enable_jellyfin = s.value(JellyfinSettings::kEnabled, JellyfinSettings::kDefaultEnabled).toBool();
+  s.endGroup();
+  if (enable_jellyfin) {
+    ui_->tabs->EnableTab(jellyfin_view_);
+  }
+  else {
+    ui_->tabs->DisableTab(jellyfin_view_);
+  }
+#endif
+
 #ifdef HAVE_SPOTIFY
   s.beginGroup(SpotifySettings::kSettingsGroup);
   bool enable_spotify = s.value(SpotifySettings::kEnabled, SpotifySettings::kDefaultEnabled).toBool();
@@ -1385,6 +1416,10 @@ void MainWindow::ReloadAllSettings() {
 #ifdef HAVE_TIDAL
   tidal_view_->ReloadSettings();
   tidal_view_->search_view()->ReloadSettings();
+#endif
+#ifdef HAVE_JELLYFIN
+  jellyfin_view_->ReloadSettings();
+  jellyfin_view_->search_view()->ReloadSettings();
 #endif
 #ifdef HAVE_SPOTIFY
   spotify_view_->ReloadSettings();
@@ -2845,6 +2880,9 @@ void MainWindow::OpenServiceSettingsDialog(const Song::Source source) {
     case Song::Source::Qobuz:
       settings_dialog_->OpenAtPage(SettingsDialog::Page::Qobuz);
       break;
+    case Song::Source::Jellyfin:
+      settings_dialog_->OpenAtPage(SettingsDialog::Page::Jellyfin);
+      break;
     case Song::Source::Spotify:
       settings_dialog_->OpenAtPage(SettingsDialog::Page::Spotify);
       break;
@@ -3529,6 +3567,11 @@ void MainWindow::FocusSearchField() {
 #ifdef HAVE_TIDAL
   else if (ui_->tabs->currentIndex() == ui_->tabs->IndexOfTab(tidal_view_) && !tidal_view_->SearchFieldHasFocus()) {
     tidal_view_->FocusSearchField();
+  }
+#endif
+#ifdef HAVE_JELLYFIN
+  else if (ui_->tabs->currentIndex() == ui_->tabs->IndexOfTab(jellyfin_view_) && !jellyfin_view_->SearchFieldHasFocus()) {
+    jellyfin_view_->FocusSearchField();
   }
 #endif
 #ifdef HAVE_SPOTIFY

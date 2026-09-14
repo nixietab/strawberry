@@ -52,6 +52,7 @@ PlaylistItemPtr PlaylistItem::NewFromSource(const Song::Source source, const QUu
     case Song::Source::Tidal:
     case Song::Source::Spotify:
     case Song::Source::Qobuz:
+    case Song::Source::Jellyfin:
       return make_shared<StreamServicePlaylistItem>(source, uuid);
     case Song::Source::Stream:
     case Song::Source::RadioParadise:
@@ -78,6 +79,7 @@ PlaylistItemPtr PlaylistItem::NewFromSong(const Song &song, const bool signal) {
     case Song::Source::Tidal:
     case Song::Source::Spotify:
     case Song::Source::Qobuz:
+    case Song::Source::Jellyfin:
       return make_shared<StreamServicePlaylistItem>(song, signal);
     case Song::Source::Stream:
     case Song::Source::RadioParadise:

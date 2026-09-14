@@ -121,6 +121,7 @@ QString CoverUtils::CoverFilenameFromSource(const Song::Source source, const QUr
   QString filename;
 
   switch (source) {
+    case Song::Source::Jellyfin:
     case Song::Source::Tidal:
       if (!album_id.isEmpty()) {
         filename = album_id + QLatin1Char('-') + cover_url.fileName();
