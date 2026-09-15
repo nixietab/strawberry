@@ -60,6 +60,7 @@ constexpr int kLimit = 200;
 constexpr int kMaxConcurrentRequests = 3;
 constexpr int kMaxConcurrentAlbumCoverRequests = 3;
 constexpr int kMaxPageRetries = 3;
+constexpr int kMaxPages = 1000;
 constexpr int kCoverSize = 600;
 constexpr int kRequestTimeoutMs = 30000;
 }  // namespace
@@ -76,6 +77,8 @@ JellyfinRequest::JellyfinRequest(JellyfinService *service, const SharedPtr<Netwo
       requests_received_(0),
       items_total_(-1),
       items_received_(0),
+      paging_complete_(false),
+      page_cap_hit_(false),
       album_covers_requests_active_(0),
       album_covers_requested_(0),
       album_covers_received_(0) {}
@@ -128,6 +131,9 @@ void JellyfinRequest::StartRequests() {
 void JellyfinRequest::AddRequest(const int offset) {
 
   if (finished_) return;
+  if (pages_scheduled_.contains(offset) || pages_queued_.contains(offset)) return;
+
+  pages_queued_.insert(offset);
   requests_queue_.enqueue(offset);
   FlushRequests();
 
@@ -144,8 +150,10 @@ void JellyfinRequest::FlushRequests() {
 
     ParamList params;
     params << Param(u"Recursive"_s, u"true"_s)
-           << Param(u"SortBy"_s, u"SortName"_s)
-           << Param(u"Fields"_s, u"MediaSources,Artists"_s)
+           << Param(u"SortBy"_s, u"SortName,DateCreated"_s)
+           << Param(u"SortOrder"_s, u"Ascending"_s)
+           << Param(u"EnableTotalRecordCount"_s, u"true"_s)
+           << Param(u"Fields"_s, u"MediaStreams,Artists"_s)
            << Param(u"StartIndex"_s, QString::number(offset))
            << Param(u"Limit"_s, QString::number(kLimit));
 
@@ -200,6 +208,16 @@ void JellyfinRequest::ReplyReceived(QNetworkReply *reply, const int offset_reque
 
   const JsonObjectResult json_object_result = ParseJsonObject(reply);
   if (!json_object_result.success()) {
+
+    pages_queued_.remove(offset_requested);
+
+    if (json_object_result.http_status_code == 401) {
+      qLog(Debug) << "Jellyfin:" << "Received HTTP code 401 for offset" << offset_requested << "- re-authenticating.";
+      finished_ = true;
+      service_->Catalog401();
+      return;
+    }
+
     if (RetryPage(offset_requested)) return;
     Error(json_object_result.error_message);
     return;
@@ -217,6 +235,7 @@ void JellyfinRequest::ReplyReceived(QNetworkReply *reply, const int offset_reque
   }
 
   const QJsonArray array_items = array_items_result.json_array;
+  const int page_items = array_items.size();
 
   int items_received = 0;
   for (const QJsonValue &value_item : array_items) {
@@ -231,29 +250,42 @@ void JellyfinRequest::ReplyReceived(QNetworkReply *reply, const int offset_reque
       continue;
     }
 
+    if (!songs_.contains(song.song_id())) ++items_received;
     songs_.insert(song.song_id(), song);
-    ++items_received;
 
   }
 
-  items_received_ += items_received;
+  items_received_ += page_items;
+  pages_queued_.remove(offset_requested);
+  pages_scheduled_.insert(offset_requested);
+  page_retries_.remove(offset_requested);
 
-  if (offset_requested == 0) {
-    if (items_total_ < 0) {
-      if (json_object.contains(u"TotalRecordCount"_s) && json_object.value(u"TotalRecordCount"_s).isDouble()) {
-        items_total_ = json_object.value(u"TotalRecordCount"_s).toInt();
-      }
-      else {
-        items_total_ = items_received_;
-      }
+  // The TotalRecordCount is used for progress and sanity checks only, since some
+  // Jellyfin versions misreport or omit it. Paging is terminated by the server
+  // returning a page with fewer items than requested
+  if (json_object.contains(u"TotalRecordCount"_s) && json_object.value(u"TotalRecordCount"_s).isDouble()) {
+    const int server_total = json_object.value(u"TotalRecordCount"_s).toInt();
+    if (server_total > items_total_) items_total_ = server_total;
+  }
+  if (items_total_ < 0) items_total_ = items_received_;
+
+  Q_EMIT UpdateProgress(query_id_, GetProgress(items_received_, items_total_));
+
+  qLog(Debug) << "Jellyfin:" << "Page for offset" << offset_requested << "->" << page_items << "items (" << items_received << "new), total" << items_total_ << ", unique songs" << songs_.size() << ", received" << items_received_;
+
+  const int next_offset = offset_requested + kLimit;
+  if (page_items >= kLimit && !paging_complete_) {
+    if (pages_scheduled_.size() >= kMaxPages) {
+      page_cap_hit_ = true;
+      qLog(Error) << "Jellyfin:" << "Stopping pagination after reaching the maximum number of pages (" << kMaxPages << ").";
     }
-    Q_EMIT UpdateProgress(query_id_, GetProgress(0, items_total_));
-    for (int offset = kLimit; offset < items_total_; offset += kLimit) {
-      AddRequest(offset);
+    else {
+      AddRequest(next_offset);
     }
   }
   else {
-    Q_EMIT UpdateProgress(query_id_, GetProgress(items_received_, items_total_));
+    paging_complete_ = true;
+    qLog(Debug) << "Jellyfin:" << "Paging complete at offset" << offset_requested << "-" << songs_.size() << "unique songs of" << items_total_ << "total items.";
   }
 
 }
@@ -662,10 +694,9 @@ void JellyfinRequest::FinishCheck() {
   }
 
   if (download_album_covers() &&
+      paging_complete_ &&
       requests_queue_.isEmpty() &&
       requests_active_ <= 0 &&
-      items_total_ >= 0 &&
-      items_received_ >= items_total_ &&
       album_covers_requested_ == 0) {
     GetAlbumCovers();
   }
@@ -675,6 +706,14 @@ void JellyfinRequest::FinishCheck() {
       album_cover_requests_queue_.isEmpty() &&
       album_covers_requests_active_ <= 0 &&
       album_covers_received_ >= album_covers_requested_) {
+
+    if (!paging_complete_) {
+      Error(tr("Catalog may be incomplete: stopped receiving results before the end of the list was reached."));
+    }
+    else if (items_total_ > 0 && items_received_ > items_total_) {
+      qLog(Debug) << "Jellyfin:" << "Received" << items_received_ << "items but the server reported" << items_total_ << "total.";
+    }
+
     finished_ = true;
     if (songs_.isEmpty() && errors_.isEmpty()) {
       Q_EMIT Results(query_id_, SongMap(), QString());

@@ -96,7 +96,9 @@ JellyfinService::JellyfinService(const SharedPtr<TaskManager> task_manager,
       verify_certificate_(true),
       download_album_covers_(true),
       server_side_scrobbling_(false),
-      auto_login_requested_(false) {
+      auto_login_requested_(false),
+      reauthenticating_(false),
+      pending_catalog_refresh_(false) {
 
   url_handler_ = new JellyfinUrlHandler(this);
   url_handlers->Register(url_handler_);
@@ -212,6 +214,29 @@ QString JellyfinService::CreateAuthorizationHeader() const {
 
 void JellyfinService::SendPing() {
   SendPingWithCredentials(server_url_, username_, password_);
+}
+
+void JellyfinService::Catalog401() {
+
+  if (reauthenticating_) {
+    pending_catalog_refresh_ = true;
+    return;
+  }
+
+  reauthenticating_ = true;
+  pending_catalog_refresh_ = true;
+
+  if (!server_url_.isValid() || username_.isEmpty() || password_.isEmpty()) {
+    qLog(Error) << "Jellyfin:" << "Received HTTP code 401, but no stored credentials are available to re-authenticate with.";
+    reauthenticating_ = false;
+    pending_catalog_refresh_ = false;
+    Q_EMIT OpenSettingsDialog(kSource);
+    return;
+  }
+
+  qLog(Debug) << "Jellyfin:" << "Received HTTP code 401, re-authenticating with stored credentials.";
+  SendPingWithCredentials(server_url_, username_, password_);
+
 }
 
 QUrl JellyfinService::GetStreamUrl(const QString &song_id) const {
@@ -338,9 +363,13 @@ void JellyfinService::HandleAuthReply(QNetworkReply *reply, const QUrl &url, con
   Q_EMIT TestSuccess();
   Q_EMIT TestComplete(true);
 
-  // After an automatic login on startup, load the catalogs right away so the tabs are populated when the user opens them.
-  if (auto_login_requested_) {
-    auto_login_requested_ = false;
+  // Load the catalogs right away
+  const bool load_catalogs = auto_login_requested_ || pending_catalog_refresh_;
+  auto_login_requested_ = false;
+  pending_catalog_refresh_ = false;
+  reauthenticating_ = false;
+  if (load_catalogs) {
+    qLog(Debug) << "Jellyfin:" << "Login successful, loading catalogs.";
     GetArtists();
     GetAlbums();
     GetSongs();
@@ -354,11 +383,30 @@ void JellyfinService::AuthError(const QString &error, const QVariant &debug) {
   Q_EMIT TestFailure(error);
   Q_EMIT TestComplete(false, error);
 
+  // Clear the re-authentication state so a failed login attempt does not leave the service stuck.
+  if (reauthenticating_) {
+    reauthenticating_ = false;
+    pending_catalog_refresh_ = false;
+  }
+
 }
 
 void JellyfinService::GetArtists() {
 
   if (!authenticated()) {
+
+    // If a login is already in flight (startup auto-login or re-authentication) or stored
+    // credentials are available, defer this request until the login completes instead of
+    // failing with an authentication error.
+    if (server_url_.isValid() && !username_.isEmpty() && !password_.isEmpty()) {
+      pending_catalog_refresh_ = true;
+      if (!reauthenticating_ && !auto_login_requested_) {
+        reauthenticating_ = true;
+        SendPingWithCredentials(server_url_, username_, password_);
+      }
+      return;
+    }
+
     Q_EMIT ArtistsResults(SongMap(), tr("Not authenticated with Jellyfin."));
     Q_EMIT OpenSettingsDialog(kSource);
     return;
@@ -399,6 +447,19 @@ void JellyfinService::ArtistsUpdateProgressReceived(const int id, const int prog
 void JellyfinService::GetAlbums() {
 
   if (!authenticated()) {
+
+    // If a login is already in flight (startup auto-login or re-authentication) or stored
+    // credentials are available, defer this request until the login completes instead of
+    // failing with an authentication error.
+    if (server_url_.isValid() && !username_.isEmpty() && !password_.isEmpty()) {
+      pending_catalog_refresh_ = true;
+      if (!reauthenticating_ && !auto_login_requested_) {
+        reauthenticating_ = true;
+        SendPingWithCredentials(server_url_, username_, password_);
+      }
+      return;
+    }
+
     Q_EMIT AlbumsResults(SongMap(), tr("Not authenticated with Jellyfin."));
     Q_EMIT OpenSettingsDialog(kSource);
     return;
@@ -439,6 +500,19 @@ void JellyfinService::AlbumsUpdateProgressReceived(const int id, const int progr
 void JellyfinService::GetSongs() {
 
   if (!authenticated()) {
+
+    // If a login is already in flight (startup auto-login or re-authentication) or stored
+    // credentials are available, defer this request until the login completes instead of
+    // failing with an authentication error.
+    if (server_url_.isValid() && !username_.isEmpty() && !password_.isEmpty()) {
+      pending_catalog_refresh_ = true;
+      if (!reauthenticating_ && !auto_login_requested_) {
+        reauthenticating_ = true;
+        SendPingWithCredentials(server_url_, username_, password_);
+      }
+      return;
+    }
+
     Q_EMIT SongsResults(SongMap(), tr("Not authenticated with Jellyfin."));
     Q_EMIT OpenSettingsDialog(kSource);
     return;

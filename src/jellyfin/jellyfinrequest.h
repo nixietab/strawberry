@@ -26,6 +26,7 @@
 #include <QList>
 #include <QMap>
 #include <QQueue>
+#include <QSet>
 #include <QVariant>
 #include <QString>
 #include <QUrl>
@@ -109,10 +110,14 @@ class JellyfinRequest : public JellyfinBaseRequest {
 
   QQueue<int> requests_queue_;
   QHash<int, int> page_retries_;
+  QSet<int> pages_queued_;
+  QSet<int> pages_scheduled_;
   int requests_active_;
   int requests_received_;
   int items_total_;
   int items_received_;
+  bool paging_complete_;
+  bool page_cap_hit_;
 
   QQueue<AlbumCoverRequest> album_cover_requests_queue_;
   QHash<QString, QString> album_covers_requests_sent_;

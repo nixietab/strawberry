@@ -105,6 +105,7 @@ class JellyfinService : public StreamingService {
  public Q_SLOTS:
   void SendPing();
   void SendPingWithCredentials(QUrl url, const QString &username, const QString &password);
+  void Catalog401();
 
   void GetArtists() override;
   void GetAlbums() override;
@@ -187,6 +188,9 @@ class JellyfinService : public StreamingService {
   QList<QNetworkReply*> replies_;
 
   bool auto_login_requested_;
+
+  bool reauthenticating_;
+  bool pending_catalog_refresh_;
 };
 
 #endif  // JELLYFINSERVICE_H
