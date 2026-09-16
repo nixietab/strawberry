@@ -192,7 +192,13 @@ JsonBaseRequest::JsonObjectResult JellyfinBaseRequest::ParseJsonObject(QNetworkR
     QJsonParseError json_parse_error;
     const QJsonDocument json_document = QJsonDocument::fromJson(data, &json_parse_error);
     if (json_parse_error.error == QJsonParseError::NoError) {
-      result.json_object = json_document.object();
+      if (!json_document.isEmpty() && json_document.isObject()) {
+        result.json_object = json_document.object();
+      }
+      else {
+        result.error_code = ErrorCode::ParseError;
+        result.error_message = QStringLiteral("Unexpected Json response type.");
+      }
     }
     else {
       result.error_code = ErrorCode::ParseError;

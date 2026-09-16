@@ -88,7 +88,7 @@ class JellyfinRequest : public JellyfinBaseRequest {
 
   QString IncludeItemTypes() const;
   QString RessourcePath() const;
-  QString CreateImageUrl(const QString &item_id) const;
+  QString CreateImageUrl(const QString &item_id, const QString &image_tag = QString()) const;
 
   int GetProgress(const int count, const int total);
   void FinishCheck();
@@ -120,7 +120,7 @@ class JellyfinRequest : public JellyfinBaseRequest {
   bool page_cap_hit_;
 
   QQueue<AlbumCoverRequest> album_cover_requests_queue_;
-  QHash<QString, QString> album_covers_requests_sent_;
+  QHash<QString, QStringList> album_covers_requests_sent_;
   int album_covers_requests_active_;
   int album_covers_requested_;
   int album_covers_received_;

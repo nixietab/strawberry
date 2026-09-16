@@ -267,7 +267,7 @@ void JellyfinRequest::ReplyReceived(QNetworkReply *reply, const int offset_reque
     const int server_total = json_object.value(u"TotalRecordCount"_s).toInt();
     if (server_total > items_total_) items_total_ = server_total;
   }
-  if (items_total_ < 0) items_total_ = items_received_;
+  if (items_total_ < items_received_) items_total_ = items_received_;
 
   Q_EMIT UpdateProgress(query_id_, GetProgress(items_received_, items_total_));
 
@@ -409,14 +409,17 @@ bool JellyfinRequest::ParseAudio(Song &song, const QJsonObject &json_object) {
   }
 
   QString cover_item_id;
+  QString cover_image_tag;
   const QString album_primary_image_tag = json_object.value(u"AlbumPrimaryImageTag"_s).toString();
   if (!album_id.isEmpty() && !album_primary_image_tag.isEmpty()) {
     cover_item_id = album_id;
+    cover_image_tag = album_primary_image_tag;
   }
   else if (json_object.contains(u"ImageTags"_s) && json_object.value(u"ImageTags"_s).isObject()) {
     const QJsonObject object_image_tags = json_object.value(u"ImageTags"_s).toObject();
     if (object_image_tags.contains(u"Primary"_s)) {
       cover_item_id = item_id;
+      cover_image_tag = object_image_tags.value(u"Primary"_s).toString();
     }
   }
   if (cover_item_id.isEmpty()) {
@@ -438,7 +441,7 @@ bool JellyfinRequest::ParseAudio(Song &song, const QJsonObject &json_object) {
   song.set_filetype(filetype);
   if (compilation) song.set_compilation_detected(true);
   song.set_directory_id(0);
-  if (!cover_item_id.isEmpty()) song.set_art_automatic(QUrl(CreateImageUrl(cover_item_id)));
+  if (!cover_item_id.isEmpty()) song.set_art_automatic(QUrl(CreateImageUrl(cover_item_id, cover_image_tag)));
   song.set_valid(true);
 
   return true;
@@ -476,11 +479,11 @@ bool JellyfinRequest::ParseAlbum(Song &song, const QJsonObject &json_object) {
     }
   }
 
-  QString cover_url;
+  QString cover_image_tag;
   if (json_object.contains(u"ImageTags"_s) && json_object.value(u"ImageTags"_s).isObject()) {
     const QJsonObject object_image_tags = json_object.value(u"ImageTags"_s).toObject();
     if (object_image_tags.contains(u"Primary"_s)) {
-      cover_url = CreateImageUrl(item_id);
+      cover_image_tag = object_image_tags.value(u"Primary"_s).toString();
     }
   }
 
@@ -492,7 +495,7 @@ bool JellyfinRequest::ParseAlbum(Song &song, const QJsonObject &json_object) {
   song.set_year(year);
   song.set_genre(genre);
   song.set_directory_id(0);
-  if (!cover_url.isEmpty()) song.set_art_automatic(QUrl(cover_url));
+  if (!cover_image_tag.isEmpty()) song.set_art_automatic(QUrl(CreateImageUrl(item_id, cover_image_tag)));
   song.set_valid(true);
 
   return true;
@@ -512,13 +515,14 @@ bool JellyfinRequest::ParseArtist(Song &song, const QJsonObject &json_object) {
 
 }
 
-QString JellyfinRequest::CreateImageUrl(const QString &item_id) const {
+QString JellyfinRequest::CreateImageUrl(const QString &item_id, const QString &image_tag) const {
 
   QUrl url = CreateUrl(u"Items/%1/Images/Primary"_s.arg(item_id));
   QUrlQuery url_query;
   url_query.addQueryItem(u"maxWidth"_s, QString::number(kCoverSize));
   url_query.addQueryItem(u"maxHeight"_s, QString::number(kCoverSize));
   url_query.addQueryItem(u"quality"_s, QString::number(90));
+  if (!image_tag.isEmpty()) url_query.addQueryItem(u"tag"_s, image_tag);
   if (!access_token().isEmpty()) url_query.addQueryItem(u"api_key"_s, access_token());
   url.setQuery(url_query);
 
@@ -552,8 +556,6 @@ void JellyfinRequest::AddAlbumCoverRequest(const Song &song) {
   const QString image_id = song.album_id().isEmpty() ? song.song_id() : song.album_id();
   if (image_id.isEmpty()) return;
 
-  if (album_covers_requests_sent_.contains(image_id)) return;
-
   const QString cover_path = Song::ImageCacheDir(Song::Source::Jellyfin);
   QDir dir(cover_path);
   if (!dir.exists()) dir.mkpath(cover_path);
@@ -572,7 +574,13 @@ void JellyfinRequest::AddAlbumCoverRequest(const Song &song) {
     return;
   }
 
-  album_covers_requests_sent_.insert(image_id, song.song_id());
+  // Record the song ID under the shared image ID so that every song belonging
+  // to the same album gets the downloaded cover applied, while only a single
+  // network request is queued for each image.
+  const bool already_requested = album_covers_requests_sent_.contains(image_id);
+  album_covers_requests_sent_[image_id] << song.song_id();
+  if (already_requested) return;
+
   ++album_covers_requested_;
 
   album_cover_requests_queue_.enqueue(request);
@@ -648,10 +656,12 @@ void JellyfinRequest::AlbumCoverReceived(QNetworkReply *reply, const AlbumCoverR
   QImage image;
   if (image.loadFromData(data, format)) {
     if (image.save(request.filename, format)) {
-      while (album_covers_requests_sent_.contains(request.album_id)) {
-        const QString song_id = album_covers_requests_sent_.take(request.album_id);
-        if (songs_.contains(song_id)) {
-          songs_[song_id].set_art_automatic(QUrl::fromLocalFile(request.filename));
+      if (album_covers_requests_sent_.contains(request.album_id)) {
+        const QStringList song_ids = album_covers_requests_sent_.take(request.album_id);
+        for (const QString &song_id : song_ids) {
+          if (songs_.contains(song_id)) {
+            songs_[song_id].set_art_automatic(QUrl::fromLocalFile(request.filename));
+          }
         }
       }
     }

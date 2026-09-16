@@ -20,6 +20,8 @@
 #ifndef JELLYFINURLHANDLER_H
 #define JELLYFINURLHANDLER_H
 
+#include "config.h"
+
 #include <QString>
 #include <QUrl>
 

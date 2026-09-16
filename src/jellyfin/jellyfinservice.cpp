@@ -383,7 +383,8 @@ void JellyfinService::AuthError(const QString &error, const QVariant &debug) {
   Q_EMIT TestFailure(error);
   Q_EMIT TestComplete(false, error);
 
-  // Clear the re-authentication state so a failed login attempt does not leave the service stuck.
+  // Clear the authentication-in-progress state so a failed login attempt does not leave the service stuck.
+  auto_login_requested_ = false;
   if (reauthenticating_) {
     reauthenticating_ = false;
     pending_catalog_refresh_ = false;
