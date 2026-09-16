@@ -56,6 +56,7 @@ class JellyfinSettingsPage : public SettingsPage {
  private:
   Ui_JellyfinSettingsPage *ui_;
   const SharedPtr<JellyfinService> service_;
+  bool test_pending_ = false;
 };
 
 #endif  // JELLYFINSETTINGSPAGE_H

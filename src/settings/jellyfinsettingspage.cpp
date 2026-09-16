@@ -116,6 +116,7 @@ void JellyfinSettingsPage::TestClicked() {
     return;
   }
 
+  test_pending_ = true;
   Q_EMIT Test(server_url, ui_->username->text(), ui_->password->text());
   ui_->button_test->setEnabled(false);
 
@@ -123,7 +124,7 @@ void JellyfinSettingsPage::TestClicked() {
 
 bool JellyfinSettingsPage::eventFilter(QObject *object, QEvent *event) {
 
-  if (object == dialog() && event->type() == QEvent::Enter) {
+  if (object == dialog() && event->type() == QEvent::Enter && !test_pending_) {
     ui_->button_test->setEnabled(true);
   }
 
@@ -133,18 +134,20 @@ bool JellyfinSettingsPage::eventFilter(QObject *object, QEvent *event) {
 
 void JellyfinSettingsPage::TestSuccess() {
 
-  if (!isVisible()) return;
+  test_pending_ = false;
   ui_->button_test->setEnabled(true);
 
+  if (!isVisible()) return;
   QMessageBox::information(this, tr("Test successful!"), tr("Test successful!"));
 
 }
 
 void JellyfinSettingsPage::TestFailure(const QString &failure_reason) {
 
-  if (!isVisible()) return;
+  test_pending_ = false;
   ui_->button_test->setEnabled(true);
 
+  if (!isVisible()) return;
   QMessageBox::warning(this, tr("Test failed!"), failure_reason);
 
 }

@@ -430,7 +430,7 @@ void JellyfinService::ArtistsResultsReceived(const int id, const SongMap &songs,
 
   Q_UNUSED(id);
   Q_EMIT ArtistsResults(songs, error);
-  if (!songs.isEmpty()) artists_collection_backend_->UpdateSongsBySongIDAsync(songs);
+  artists_collection_backend_->UpdateSongsBySongIDAsync(songs);
   ResetArtistsRequest();
 
 }
@@ -483,7 +483,7 @@ void JellyfinService::AlbumsResultsReceived(const int id, const SongMap &songs, 
 
   Q_UNUSED(id);
   Q_EMIT AlbumsResults(songs, error);
-  if (!songs.isEmpty()) albums_collection_backend_->UpdateSongsBySongIDAsync(songs);
+  albums_collection_backend_->UpdateSongsBySongIDAsync(songs);
   ResetAlbumsRequest();
 
 }
@@ -536,7 +536,7 @@ void JellyfinService::SongsResultsReceived(const int id, const SongMap &songs, c
 
   Q_UNUSED(id);
   Q_EMIT SongsResults(songs, error);
-  if (!songs.isEmpty()) songs_collection_backend_->UpdateSongsBySongIDAsync(songs);
+  songs_collection_backend_->UpdateSongsBySongIDAsync(songs);
   ResetSongsRequest();
 
 }
