@@ -72,7 +72,8 @@ void ScrobblerSettingsService::ReloadSettings() {
              << Song::Source::Qobuz
              << Song::Source::Spotify
              << Song::Source::SomaFM
-             << Song::Source::RadioParadise;
+             << Song::Source::RadioParadise
+             << Song::Source::Jellyfin;
   }
   else {
     for (const QString &source : sources) {

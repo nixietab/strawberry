@@ -29,6 +29,7 @@
 #include <QString>
 #include <QStringList>
 #include <QUrl>
+#include <QDateTime>
 #include <QScopedPointer>
 #include <QSslError>
 
@@ -49,6 +50,7 @@ class AlbumCoverLoader;
 class CollectionBackend;
 class CollectionFilter;
 class JellyfinRequest;
+class JellyfinScrobbleRequest;
 class JellyfinUrlHandler;
 
 using JellyfinRequestPtr = QScopedPointer<JellyfinRequest, QScopedPointerDeleteLater>;
@@ -86,6 +88,10 @@ class JellyfinService : public StreamingService {
   bool server_side_scrobbling() const { return server_side_scrobbling_; }
 
   QUrl GetStreamUrl(const QString &song_id) const;
+  void Scrobble(const QString &song_id, const bool submission, const QDateTime &time);
+  void ReportPlaybackProgress(const QString &song_id, const QDateTime &time);
+
+  QString CreateAuthorizationHeader(const bool with_token = false) const;
 
   SharedPtr<CollectionBackend> artists_collection_backend() override { return artists_collection_backend_; }
   SharedPtr<CollectionBackend> albums_collection_backend() override { return albums_collection_backend_; }
@@ -140,7 +146,7 @@ class JellyfinService : public StreamingService {
 
  private:
   QNetworkReply *CreateAuthenticateRequest(const QUrl &url, const QString &username, const QString &password);
-  QString CreateAuthorizationHeader() const;
+  SharedPtr<JellyfinScrobbleRequest> ScrobbleRequest();
   void ParseAuthReply(const QNetworkReply *reply);
   void SetAuth(const QString &access_token, const QString &user_id) { access_token_ = access_token; user_id_ = user_id; }
   void AuthError(const QString &error, const QVariant &debug = QVariant());
@@ -163,6 +169,7 @@ class JellyfinService : public StreamingService {
   JellyfinRequestPtr albums_request_;
   JellyfinRequestPtr songs_request_;
   JellyfinRequestPtr search_request_;
+  SharedPtr<JellyfinScrobbleRequest> scrobble_request_;
 
   QTimer *timer_search_delay_;
   int pending_search_id_;
@@ -192,5 +199,7 @@ class JellyfinService : public StreamingService {
   bool reauthenticating_;
   bool pending_catalog_refresh_;
 };
+
+using JellyfinServicePtr = SharedPtr<JellyfinService>;
 
 #endif  // JELLYFINSERVICE_H

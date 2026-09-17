@@ -25,6 +25,7 @@
 #include <QByteArray>
 #include <QString>
 #include <QUrl>
+#include <QJsonObject>
 
 #include "includes/shared_ptr.h"
 #include "core/jsonbaserequest.h"
@@ -68,6 +69,7 @@ class JellyfinBaseRequest : public JsonBaseRequest {
 
   QNetworkReply *CreateGetRequest(const QString &ressource_path, const ParamList &params);
   QNetworkReply *CreateGetRequest(const QUrl &url);
+  QNetworkReply *CreatePostRequest(const QString &ressource_path, const QJsonObject &json_object);
 
   JsonObjectResult ParseJsonObject(QNetworkReply *reply);
 

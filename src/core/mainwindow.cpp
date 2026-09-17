@@ -1637,8 +1637,11 @@ void MainWindow::SendNowPlaying() {
 
   // Send now playing to scrobble services
   Playlist *playlist = app_->playlist_manager()->active();
-  if (app_->scrobbler()->enabled() && playlist && playlist->current_item() && playlist->current_item()->EffectiveMetadata().is_metadata_good()) {
-    app_->scrobbler()->UpdateNowPlaying(playlist->current_item()->EffectiveMetadata());
+  if (!playlist || !playlist->current_item() || !playlist->current_item()->EffectiveMetadata().is_metadata_good()) return;
+
+  app_->scrobbler()->UpdateNowPlaying(playlist->current_item()->EffectiveMetadata());
+
+  if (app_->scrobbler()->enabled()) {
     ui_->action_love->setEnabled(true);
     ui_->button_love->setEnabled(true);
     systemtrayicon_->LoveStateChanged(true);
@@ -1931,7 +1934,7 @@ void MainWindow::UpdateTrackPosition() {
 #endif
 
   // Send Scrobble
-  if (app_->scrobbler()->enabled() && item->EffectiveMetadata().is_metadata_good()) {
+  if (item->EffectiveMetadata().is_metadata_good()) {
     Playlist *playlist = app_->playlist_manager()->active();
     if (playlist && !playlist->scrobbled()) {
       const qint64 scrobble_point = (playlist->scrobble_point_nanosec() / kNsecPerSec);

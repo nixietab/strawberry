@@ -1479,15 +1479,19 @@ optional_source(HAVE_JELLYFIN
     src/jellyfin/jellyfinservice.cpp
     src/jellyfin/jellyfinbaserequest.cpp
     src/jellyfin/jellyfinrequest.cpp
+    src/jellyfin/jellyfinscrobblerequest.cpp
     src/jellyfin/jellyfinurlhandler.cpp
     src/settings/jellyfinsettingspage.cpp
+    src/scrobbler/jellyfinscrobbler.cpp
   HEADERS
     src/jellyfin/jellyfinservice.h
     src/jellyfin/jellyfinbaserequest.h
     src/jellyfin/jellyfinrequest.h
+    src/jellyfin/jellyfinscrobblerequest.h
     src/jellyfin/jellyfinurlhandler.h
     src/constants/jellyfinsettings.h
     src/settings/jellyfinsettingspage.h
+    src/scrobbler/jellyfinscrobbler.h
   UI
     src/settings/jellyfinsettingspage.ui
 )

@@ -29,6 +29,8 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <QNetworkRequest>
+
+#include "core/logging.h"
 #include <QNetworkReply>
 #include <QSslConfiguration>
 #include <QSslSocket>
@@ -106,7 +108,10 @@ void JellyfinBaseRequest::SetRequestAttributes(QNetworkRequest &network_request)
   network_request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
   network_request.setAttribute(QNetworkRequest::CacheSaveControlAttribute, false);
 
+  // Jellyfin versions 10.11+ only accept the access token when it is embedded in the standard Authorization header,
+  // so always send it, in addition to the legacy X-Emby-Token header which older servers require.
   if (!access_token().isEmpty()) {
+    network_request.setRawHeader("Authorization", service_->CreateAuthorizationHeader(true).toUtf8());
     network_request.setRawHeader("X-Emby-Token", access_token().toUtf8());
   }
 
@@ -153,6 +158,25 @@ QNetworkReply *JellyfinBaseRequest::CreateGetRequest(const QUrl &url) {
   replies_ << reply;
 
   // qLog(Debug) << "Jellyfin: Sending request" << url;
+
+  return reply;
+
+}
+
+QNetworkReply *JellyfinBaseRequest::CreatePostRequest(const QString &ressource_path, const QJsonObject &json_object) {
+
+  const QUrl url = CreateUrl(ressource_path);
+
+  QNetworkRequest network_request(url);
+  SetRequestAttributes(network_request);
+  network_request.setHeader(QNetworkRequest::ContentTypeHeader, u"application/json; charset=utf-8"_s);
+
+  QNetworkReply *reply = network_->post(network_request, QJsonDocument(json_object).toJson(QJsonDocument::Compact));
+  QObject::connect(reply, &QNetworkReply::sslErrors, this, &JellyfinBaseRequest::HandleSSLErrors);
+  replies_ << reply;
+
+  qLog(Debug) << "Jellyfin: POST" << url << "Authorization:" << QString::fromUtf8(network_request.rawHeader(u"Authorization"_s))
+              << "X-Emby-Token:" << QString::fromUtf8(network_request.rawHeader(u"X-Emby-Token"_s));
 
   return reply;
 

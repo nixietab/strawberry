@@ -78,6 +78,9 @@
 #ifdef HAVE_SUBSONIC
 #  include "scrobbler/subsonicscrobbler.h"
 #endif
+#ifdef HAVE_JELLYFIN
+#  include "scrobbler/jellyfinscrobbler.h"
+#endif
 
 #include "streaming/streamingservices.h"
 
@@ -222,6 +225,9 @@ class ApplicationImpl {
           scrobbler->AddService(make_shared<ListenBrainzScrobbler>(scrobbler->settings(), app->network()));
 #ifdef HAVE_SUBSONIC
           scrobbler->AddService(make_shared<SubsonicScrobbler>(scrobbler->settings(), app->network(), app->streaming_services()->Service<SubsonicService>(), app));
+#endif
+#ifdef HAVE_JELLYFIN
+          scrobbler->AddService(make_shared<JellyfinScrobbler>(scrobbler->settings(), app->network(), app->streaming_services()->Service<JellyfinService>(), app));
 #endif
           return scrobbler;
         })

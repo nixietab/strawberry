@@ -49,6 +49,7 @@
 #include "collection/collectionmodel.h"
 #include "jellyfinservice.h"
 #include "jellyfinrequest.h"
+#include "jellyfinscrobblerequest.h"
 #include "jellyfinurlhandler.h"
 #include "constants/jellyfinsettings.h"
 
@@ -196,19 +197,26 @@ void JellyfinService::ReloadSettings() {
 
 }
 
-QString JellyfinService::CreateAuthorizationHeader() const {
+QString JellyfinService::CreateAuthorizationHeader(const bool with_token) const {
 
-  QString device_id = server_url_.toString();
   Settings s;
   s.beginGroup(JellyfinSettings::kSettingsGroup);
-  QString stored_device_id = s.value(JellyfinSettings::kDeviceId).toString();
-  if (stored_device_id.isEmpty()) {
-    stored_device_id = u"strawberry-"_s + Utilities::CryptographicRandomString(16);
-    s.setValue(JellyfinSettings::kDeviceId, stored_device_id);
+  QString device_id = s.value(JellyfinSettings::kDeviceId).toString();
+  if (device_id.isEmpty()) {
+    device_id = u"strawberry-"_s + Utilities::CryptographicRandomString(16);
+    s.setValue(JellyfinSettings::kDeviceId, device_id);
   }
   s.endGroup();
 
-  return u"MediaBrowser Client=\"%1\", Device=\"%1\", DeviceId=\"%2\", Version=\"%3\""_s.arg(QLatin1String(kClientName), stored_device_id, QLatin1String(kApiVersion));
+  QString header = u"MediaBrowser Client=\"%1\", Device=\"%2\", DeviceId=\"%3\", Version=\"%4\""_s.arg(QLatin1String(kClientName), QLatin1String(kClientName), device_id, QLatin1String(kApiVersion));
+
+  // On Jellyfin versions where the legacy X-Emby-Token / X-Emby-Authorization headers are not honored,
+  // the access token must be embedded in the authorization header itself.
+  if (with_token && !access_token_.isEmpty()) {
+    header += u", Token=\"%1\""_s.arg(access_token_);
+  }
+
+  return header;
 
 }
 
@@ -250,9 +258,43 @@ QUrl JellyfinService::GetStreamUrl(const QString &song_id) const {
   QUrlQuery query;
   query.addQueryItem(u"static"_s, u"true"_s);
   query.addQueryItem(u"api_key"_s, access_token_);
+  // The lowercase api_key query parameter is only honored when the server has legacy authorization enabled,
+  // so also add the capitalized variant that is always accepted.
+  query.addQueryItem(u"ApiKey"_s, access_token_);
   stream_url.setQuery(query);
 
   return stream_url;
+
+}
+
+void JellyfinService::Scrobble(const QString &song_id, const bool submission, const QDateTime &time) {
+
+  if (!server_url_.isValid() || access_token_.isEmpty()) {
+    return;
+  }
+
+  ScrobbleRequest()->CreateScrobbleRequest(song_id, submission, time);
+
+}
+
+void JellyfinService::ReportPlaybackProgress(const QString &song_id, const QDateTime &start_time) {
+
+  if (!server_url_.isValid() || access_token_.isEmpty()) {
+    return;
+  }
+
+  ScrobbleRequest()->CreatePlaybackProgressRequest(song_id, start_time);
+
+}
+
+SharedPtr<JellyfinScrobbleRequest> JellyfinService::ScrobbleRequest() {
+
+  if (!scrobble_request_) {
+    // We're doing requests every 30-240s the whole time, so keep reusing this instance
+    scrobble_request_.reset(new JellyfinScrobbleRequest(this, network_), [](JellyfinScrobbleRequest *request) { request->deleteLater(); });
+  }
+
+  return scrobble_request_;
 
 }
 
@@ -276,7 +318,11 @@ QNetworkReply *JellyfinService::CreateAuthenticateRequest(const QUrl &url, const
 
   QNetworkRequest network_request(url);
   network_request.setHeader(QNetworkRequest::ContentTypeHeader, u"application/json"_s);
-  network_request.setRawHeader("X-Emby-Authorization", CreateAuthorizationHeader().toUtf8());
+  // On newer Jellyfin versions (10.11+) only the standard Authorization header is read to record the client/device
+  // information on the access token, so send it alongside the legacy X-Emby-Authorization header for older servers.
+  const QByteArray authorization_header = CreateAuthorizationHeader().toUtf8();
+  network_request.setRawHeader("Authorization", authorization_header);
+  network_request.setRawHeader("X-Emby-Authorization", authorization_header);
   network_request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
   network_request.setAttribute(QNetworkRequest::Http2AllowedAttribute, http2_);
   network_request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
@@ -363,8 +409,8 @@ void JellyfinService::HandleAuthReply(QNetworkReply *reply, const QUrl &url, con
   Q_EMIT TestSuccess();
   Q_EMIT TestComplete(true);
 
-  // Load the catalogs right away
-  const bool load_catalogs = auto_login_requested_ || pending_catalog_refresh_;
+  // Only load the catalogs if a catalog request was made before the login completed (e.g. via the streaming tab).
+  const bool load_catalogs = pending_catalog_refresh_;
   auto_login_requested_ = false;
   pending_catalog_refresh_ = false;
   reauthenticating_ = false;
