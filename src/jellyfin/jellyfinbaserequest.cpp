@@ -29,8 +29,6 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <QNetworkRequest>
-
-#include "core/logging.h"
 #include <QNetworkReply>
 #include <QSslConfiguration>
 #include <QSslSocket>
@@ -174,9 +172,6 @@ QNetworkReply *JellyfinBaseRequest::CreatePostRequest(const QString &ressource_p
   QNetworkReply *reply = network_->post(network_request, QJsonDocument(json_object).toJson(QJsonDocument::Compact));
   QObject::connect(reply, &QNetworkReply::sslErrors, this, &JellyfinBaseRequest::HandleSSLErrors);
   replies_ << reply;
-
-  qLog(Debug) << "Jellyfin: POST" << url << "Authorization:" << QString::fromUtf8(network_request.rawHeader(u"Authorization"_s))
-              << "X-Emby-Token:" << QString::fromUtf8(network_request.rawHeader(u"X-Emby-Token"_s));
 
   return reply;
 

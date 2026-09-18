@@ -38,12 +38,14 @@ using namespace Qt::Literals::StringLiterals;
 
 namespace {
 constexpr int kMaxConcurrentScrobbleRequests = 3;
+constexpr int kMaxRetriesAfter401 = 3;
 constexpr qint64 kTicksPerMsec = 10000;
 }
 
 JellyfinScrobbleRequest::JellyfinScrobbleRequest(JellyfinService *service, const SharedPtr<NetworkAccessManager> network, QObject *parent)
     : JellyfinBaseRequest(service, network, parent),
-      scrobble_requests_active_(0) {}
+      scrobble_requests_active_(0),
+      retries_after_401_(0) {}
 
 void JellyfinScrobbleRequest::CreateScrobbleRequest(const QString &song_id, const bool submission, const QDateTime &start_time) {
 
@@ -98,13 +100,13 @@ void JellyfinScrobbleRequest::FlushScrobbleRequests() {
     }
 
     QNetworkReply *reply = CreatePostRequest(ressource_path, json_object);
-    QObject::connect(reply, &QNetworkReply::finished, this, [this, reply]() { ScrobbleReplyReceived(reply); });
+    QObject::connect(reply, &QNetworkReply::finished, this, [this, reply, request]() { ScrobbleReplyReceived(reply, request); });
 
   }
 
 }
 
-void JellyfinScrobbleRequest::ScrobbleReplyReceived(QNetworkReply *reply) {
+void JellyfinScrobbleRequest::ScrobbleReplyReceived(QNetworkReply *reply, const Request &request) {
 
   if (!replies_.contains(reply)) return;
   replies_.removeAll(reply);
@@ -120,11 +122,21 @@ void JellyfinScrobbleRequest::ScrobbleReplyReceived(QNetworkReply *reply) {
               << "error:" << reply->errorString();
 
   if (reply->error() != QNetworkReply::NoError || http_status != 204) {
+
+    if (http_status == 401 && retries_after_401_ < kMaxRetriesAfter401) {
+      ++retries_after_401_;
+      scrobble_requests_queue_.enqueue(request);
+      qLog(Debug) << "JellyfinScrobbleRequest: Received 401, re-authenticating and retrying.";
+      service()->Reauthenticate();
+      return;
+    }
+
     Error(QStringLiteral("%1 (%2)").arg(reply->errorString()).arg(http_status));
     FinishCheck();
     return;
   }
 
+  retries_after_401_ = 0;
   FinishCheck();
 
 }

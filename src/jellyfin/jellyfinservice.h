@@ -30,6 +30,7 @@
 #include <QStringList>
 #include <QUrl>
 #include <QDateTime>
+#include <QQueue>
 #include <QScopedPointer>
 #include <QSslError>
 
@@ -111,6 +112,7 @@ class JellyfinService : public StreamingService {
  public Q_SLOTS:
   void SendPing();
   void SendPingWithCredentials(QUrl url, const QString &username, const QString &password);
+  void Reauthenticate();
   void Catalog401();
 
   void GetArtists() override;
@@ -150,6 +152,19 @@ class JellyfinService : public StreamingService {
   void ParseAuthReply(const QNetworkReply *reply);
   void SetAuth(const QString &access_token, const QString &user_id) { access_token_ = access_token; user_id_ = user_id; }
   void AuthError(const QString &error, const QVariant &debug = QVariant());
+  void FlushPendingScrobbles();
+
+  // A playback report that arrived while the service was
+  // not yet authenticated. It is buffered and sent once a login completes.
+  struct PendingScrobbleRequest {
+    enum class Type : int {
+      Start,
+      Progress,
+      Stopped,
+    } type;
+    QString song_id;
+    QDateTime time;
+  };
 
   const SharedPtr<NetworkAccessManager> network_;
   const SharedPtr<Database> database_;
@@ -195,6 +210,8 @@ class JellyfinService : public StreamingService {
   QList<QNetworkReply*> replies_;
 
   bool auto_login_requested_;
+  bool login_in_flight_;
+  QQueue<PendingScrobbleRequest> pending_scrobble_requests_;
 
   bool reauthenticating_;
   bool pending_catalog_refresh_;

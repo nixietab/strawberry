@@ -45,12 +45,9 @@ class JellyfinScrobbleRequest : public JellyfinBaseRequest {
   void CreateScrobbleRequest(const QString &song_id, const bool submission, const QDateTime &start_time);
   void CreatePlaybackProgressRequest(const QString &song_id, const QDateTime &start_time);
 
- private:
   void FlushScrobbleRequests();
-  void ScrobbleReplyReceived(QNetworkReply *reply);
-  void FinishCheck();
-  void Error(const QString &error, const QVariant &debug = QVariant()) override;
 
+ private:
   struct Request {
     enum class Type : int {
       Start,
@@ -61,8 +58,13 @@ class JellyfinScrobbleRequest : public JellyfinBaseRequest {
     QDateTime time;
   };
 
+  void ScrobbleReplyReceived(QNetworkReply *reply, const Request &request);
+  void FinishCheck();
+  void Error(const QString &error, const QVariant &debug = QVariant()) override;
+
   QQueue<Request> scrobble_requests_queue_;
   int scrobble_requests_active_;
+  int retries_after_401_;
   QStringList errors_;
 };
 

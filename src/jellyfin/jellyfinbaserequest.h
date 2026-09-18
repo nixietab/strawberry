@@ -59,6 +59,8 @@ class JellyfinBaseRequest : public JsonBaseRequest {
   bool use_authorization_header() const override;
   QByteArray authorization_header() const override;
 
+  JellyfinService *service() const { return service_; }
+
   QUrl server_url() const;
   QString access_token() const;
   bool http2() const;

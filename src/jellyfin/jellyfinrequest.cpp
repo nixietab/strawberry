@@ -63,6 +63,10 @@ constexpr int kMaxPageRetries = 3;
 constexpr int kMaxPages = 1000;
 constexpr int kCoverSize = 600;
 constexpr int kRequestTimeoutMs = 30000;
+
+QString UrlForLog(const QUrl &url) {
+  return url.adjusted(QUrl::RemoveQuery).toString();
+}
 }  // namespace
 
 JellyfinRequest::JellyfinRequest(JellyfinService *service, const SharedPtr<NetworkAccessManager> network, const Type query_type, QObject *parent)
@@ -619,13 +623,13 @@ void JellyfinRequest::AlbumCoverReceived(QNetworkReply *reply, const AlbumCoverR
   if (!album_covers_requests_sent_.contains(request.album_id)) return;
 
   if (reply->error() != QNetworkReply::NoError) {
-    Error(QStringLiteral("%1 (%2) for %3").arg(reply->errorString()).arg(reply->error()).arg(request.url.toString()));
+    Error(QStringLiteral("%1 (%2) for %3").arg(reply->errorString()).arg(reply->error()).arg(UrlForLog(request.url)));
     if (album_covers_requests_sent_.contains(request.album_id)) album_covers_requests_sent_.remove(request.album_id);
     return;
   }
 
   if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() != 200) {
-    Error(QStringLiteral("Received HTTP code %1 for %2.").arg(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt()).arg(request.url.toString()));
+    Error(QStringLiteral("Received HTTP code %1 for %2.").arg(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt()).arg(UrlForLog(request.url)));
     if (album_covers_requests_sent_.contains(request.album_id)) album_covers_requests_sent_.remove(request.album_id);
     return;
   }
@@ -635,14 +639,14 @@ void JellyfinRequest::AlbumCoverReceived(QNetworkReply *reply, const AlbumCoverR
     mimetype = mimetype.left(mimetype.indexOf(u';'));
   }
   if (!ImageUtils::SupportedImageMimeTypes().contains(mimetype, Qt::CaseInsensitive) && !ImageUtils::SupportedImageFormats().contains(mimetype, Qt::CaseInsensitive)) {
-    Error(QStringLiteral("Unsupported mimetype for image reader %1 for %2").arg(mimetype, request.url.toString()));
+    Error(QStringLiteral("Unsupported mimetype for image reader %1 for %2").arg(mimetype, UrlForLog(request.url)));
     if (album_covers_requests_sent_.contains(request.album_id)) album_covers_requests_sent_.remove(request.album_id);
     return;
   }
 
   const QByteArray data = reply->readAll();
   if (data.isEmpty()) {
-    Error(QStringLiteral("Received empty image data for %1").arg(request.url.toString()));
+    Error(QStringLiteral("Received empty image data for %1").arg(UrlForLog(request.url)));
     if (album_covers_requests_sent_.contains(request.album_id)) album_covers_requests_sent_.remove(request.album_id);
     return;
   }
@@ -671,7 +675,7 @@ void JellyfinRequest::AlbumCoverReceived(QNetworkReply *reply, const AlbumCoverR
     }
   }
   else {
-    Error(QStringLiteral("Error decoding image data from %1.").arg(request.url.toString()));
+    Error(QStringLiteral("Error decoding image data from %1.").arg(UrlForLog(request.url)));
     if (album_covers_requests_sent_.contains(request.album_id)) album_covers_requests_sent_.remove(request.album_id);
   }
 

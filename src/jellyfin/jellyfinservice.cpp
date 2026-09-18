@@ -98,6 +98,7 @@ JellyfinService::JellyfinService(const SharedPtr<TaskManager> task_manager,
       download_album_covers_(true),
       server_side_scrobbling_(false),
       auto_login_requested_(false),
+      login_in_flight_(false),
       reauthenticating_(false),
       pending_catalog_refresh_(false) {
 
@@ -224,6 +225,20 @@ void JellyfinService::SendPing() {
   SendPingWithCredentials(server_url_, username_, password_);
 }
 
+void JellyfinService::Reauthenticate() {
+
+  if (login_in_flight_) return;
+
+  if (!server_url_.isValid() || username_.isEmpty() || password_.isEmpty()) {
+    Q_EMIT OpenSettingsDialog(kSource);
+    return;
+  }
+
+  qLog(Debug) << "Jellyfin:" << "Re-authenticating with stored credentials.";
+  SendPingWithCredentials(server_url_, username_, password_);
+
+}
+
 void JellyfinService::Catalog401() {
 
   if (reauthenticating_) {
@@ -269,7 +284,16 @@ QUrl JellyfinService::GetStreamUrl(const QString &song_id) const {
 
 void JellyfinService::Scrobble(const QString &song_id, const bool submission, const QDateTime &time) {
 
-  if (!server_url_.isValid() || access_token_.isEmpty()) {
+  if (!server_url_.isValid()) {
+    return;
+  }
+
+  if (access_token_.isEmpty()) {
+    // Not authenticated yet. Buffer the report
+    // and make sure a login is underway, it is sent once the login completes
+    if (username_.isEmpty() || password_.isEmpty()) return;
+    pending_scrobble_requests_.enqueue({submission ? PendingScrobbleRequest::Type::Stopped : PendingScrobbleRequest::Type::Start, song_id, time});
+    Reauthenticate();
     return;
   }
 
@@ -279,11 +303,37 @@ void JellyfinService::Scrobble(const QString &song_id, const bool submission, co
 
 void JellyfinService::ReportPlaybackProgress(const QString &song_id, const QDateTime &start_time) {
 
-  if (!server_url_.isValid() || access_token_.isEmpty()) {
+  if (!server_url_.isValid()) {
+    return;
+  }
+
+  if (access_token_.isEmpty()) {
+    // Not authenticated yet. Buffer the report
+    // and make sure a login is underway, it is sent once the login completes
+    if (username_.isEmpty() || password_.isEmpty()) return;
+    pending_scrobble_requests_.enqueue({PendingScrobbleRequest::Type::Progress, song_id, start_time});
+    Reauthenticate();
     return;
   }
 
   ScrobbleRequest()->CreatePlaybackProgressRequest(song_id, start_time);
+
+}
+
+void JellyfinService::FlushPendingScrobbles() {
+
+  while (!pending_scrobble_requests_.isEmpty()) {
+    const PendingScrobbleRequest pending = pending_scrobble_requests_.dequeue();
+    switch (pending.type) {
+      case PendingScrobbleRequest::Type::Start:
+      case PendingScrobbleRequest::Type::Stopped:
+        ScrobbleRequest()->CreateScrobbleRequest(pending.song_id, pending.type == PendingScrobbleRequest::Type::Stopped, pending.time);
+        break;
+      case PendingScrobbleRequest::Type::Progress:
+        ScrobbleRequest()->CreatePlaybackProgressRequest(pending.song_id, pending.time);
+        break;
+    }
+  }
 
 }
 
@@ -300,6 +350,15 @@ SharedPtr<JellyfinScrobbleRequest> JellyfinService::ScrobbleRequest() {
 
 void JellyfinService::SendPingWithCredentials(QUrl url, const QString &username, const QString &password) {
 
+  // A login request is already in flight (startup auto-login, a catalog re-authentication or the
+  // settings page test). AuthenticateByName for the same DeviceId revokes the previous access
+  // token, so overlapping logins race each other and can leave a revoked token installed in
+  // access_token_. Reuse the in-flight login instead of sending a duplicate that revokes it.
+  if (login_in_flight_) {
+    qLog(Debug) << "Jellyfin:" << "A login request is already in flight, reusing it.";
+    return;
+  }
+
   QString path = url.path();
   if (path.isEmpty()) path = u"/"_s;
   else if (!path.endsWith(u'/')) path.append(u'/');
@@ -308,6 +367,7 @@ void JellyfinService::SendPingWithCredentials(QUrl url, const QString &username,
   QNetworkReply *reply = CreateAuthenticateRequest(url, username, password);
   if (!reply) return;
 
+  login_in_flight_ = true;
   replies_ << reply;
   QObject::connect(reply, &QNetworkReply::sslErrors, this, &JellyfinService::HandleSSLErrors);
   QObject::connect(reply, &QNetworkReply::finished, this, [this, reply, url, username, password]() { HandleAuthReply(reply, url, username, password); });
@@ -358,6 +418,7 @@ void JellyfinService::HandleAuthReply(QNetworkReply *reply, const QUrl &url, con
 
   if (!replies_.contains(reply)) return;
   replies_.removeAll(reply);
+  login_in_flight_ = false;
   QObject::disconnect(reply, nullptr, this, nullptr);
   reply->deleteLater();
 
@@ -408,6 +469,11 @@ void JellyfinService::HandleAuthReply(QNetworkReply *reply, const QUrl &url, con
   SetAuth(access_token, user_id);
   Q_EMIT TestSuccess();
   Q_EMIT TestComplete(true);
+
+  // Send any playback reports that were waiting for authentication to complete and retry the
+  // playback reports that hit a 401 while a stale access token was in use.
+  FlushPendingScrobbles();
+  ScrobbleRequest()->FlushScrobbleRequests();
 
   // Only load the catalogs if a catalog request was made before the login completed (e.g. via the streaming tab).
   const bool load_catalogs = pending_catalog_refresh_;
